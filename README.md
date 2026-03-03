@@ -6,7 +6,7 @@ Auto Install GenieACS
 sudo su
 ```
 ```
-wget https://raw.githubusercontent.com/muhayyanhz/genieacs/main/gacs-yan.sh
+wget https://raw.githubusercontent.com/muhayyanhz/genieacs/main/GACS-yan.sh
 ```
 ```
 chmod +x GACS-yan.sh
