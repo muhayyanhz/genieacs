@@ -1,37 +1,33 @@
 #!/bin/bash
 
-# Color definitions
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Function to display spinner
 spinner() {
     local pid=$1
     local delay=0.1
     local spinstr='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
-    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
-        local temp=${spinstr#?}
-        printf "${CYAN} [%c]  ${NC}" "$spinstr"
-        local spinstr=$temp${spinstr%"$temp"}
+    while ps -p $pid > /dev/null 2>&1; do
+        printf "${CYAN} [%c] ${NC}" "$spinstr"
+        spinstr=${spinstr#?}${spinstr%${spinstr#?}}
         sleep $delay
         printf "\b\b\b\b\b\b"
     done
-    printf "    \b\b\b\b"
 }
 
-# Function to run command with progress
 run_command() {
     local cmd="$1"
     local msg="$2"
+
     printf "${YELLOW}%-50s${NC}" "$msg..."
-    eval "$cmd" > /dev/null 2>&1 &
+    bash -c "$cmd" > /dev/null 2>&1 &
     spinner $!
+    wait $!
+
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Done${NC}"
     else
@@ -40,89 +36,69 @@ run_command() {
     fi
 }
 
-# Print banner
-print_banner() {
-	echo -e "${BLUE}${BOLD}"
-	echo "   ___   _   ___ ___     _       _         ___         _        _ _ "
-	echo "  / __| /_\ / __/ __|   /_\ _  _| |_ ___  |_ _|_ _  __| |_ __ _| | |"
-	echo " | (_ |/ _ \ (__\__ \  / _ \ || |  _/ _ \  | || ' \(_-<  _/ _\` | | |"
-	echo "  \___/_/ \_\___|___/ /_/ \_\_,_|\__\___/ |___|_||_/__/\__\__,_|_|_|"
-	echo ""
-	echo "                     --- Linux ---"
-	echo "                     --- Hayyan ---"
-	echo -e "${NC}"
-}
+echo -e "${BOLD}GenieACS Installer for Armbian / Debian Bullseye${NC}"
 
-# Check for root access
 if [ "$EUID" -ne 0 ]; then
-    echo -e "${RED}This script must be run as root${NC}"
+    echo "Run as root"
     exit 1
 fi
 
-# Print banner
-print_banner
+echo -e "\n${BOLD}Starting installation...${NC}\n"
 
-# Main installation process
-total_steps=25
-current_step=0
+run_command "apt update -y" "Updating package list"
 
-echo -e "\n${MAGENTA}${BOLD}Starting GenieACS Installation Process${NC}\n"
+run_command "apt install -y curl gnupg build-essential" "Installing base packages"
 
-run_command "apt-get update -y" "Updating system ($(( ++current_step ))/$total_steps)"
+# NodeJS 18 (recommended for GenieACS)
+run_command "curl -fsSL https://deb.nodesource.com/setup_18.x | bash -" "Adding NodeJS repo"
 
-run_command "sed -i 's/#\$nrconf{restart} = '"'"'i'"'"';/\$nrconf{restart} = '"'"'a'"'"';/g' /etc/needrestart/needrestart.conf" "Configuring needrestart ($(( ++current_step ))/$total_steps)"
+run_command "apt install -y nodejs" "Installing NodeJS"
 
-run_command "apt install -y nodejs" "Installing NodeJS ($(( ++current_step ))/$total_steps)"
+# MongoDB repo for Debian 11
+run_command "curl -fsSL https://pgp.mongodb.com/server-4.4.asc | gpg --dearmor -o /usr/share/keyrings/mongodb.gpg" "Adding MongoDB key"
 
-run_command "apt install -y npm" "Installing NPM ($(( ++current_step ))/$total_steps)"
+echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb.gpg ] https://repo.mongodb.org/apt/debian bullseye/mongodb-org/4.4 main" > /etc/apt/sources.list.d/mongodb-org.list
 
-run_command "wget http://ports.ubuntu.com/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2_arm64.deb && dpkg -i libssl1.1_1.1.1f-1ubuntu2_arm64.deb" "Installing libssl ($(( ++current_step ))/$total_steps)"
+run_command "apt update -y" "Updating repo"
 
-run_command "wget http://ports.ubuntu.com/pool/main/o/openssl/libssl-dev_1.1.1f-1ubuntu2_arm64.deb && dpkg -i libssl-dev_1.1.1f-1ubuntu2_arm64.deb" "Installing libssl ($(( ++current_step ))/$total_steps)"
+run_command "apt install -y mongodb-org" "Installing MongoDB"
 
-#run_command "curl -fsSL https://www.mongodb.org/static/pgp/server-4.4.asc | apt-key add -" "Adding MongoDB key ($(( ++current_step ))/$total_steps)"
+run_command "systemctl enable mongod" "Enable MongoDB"
 
-#run_command "echo 'deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/4.4 multiverse' | tee /etc/apt/sources.list.d/mongodb-org-4.4.list" "Adding MongoDB repository ($(( ++current_step ))/$total_steps)"
+run_command "systemctl start mongod" "Start MongoDB"
 
-run_command "apt-get install mongodb-org=4.4.8 mongodb-org-server=4.4.8 mongodb-org-shell=4.4.8 mongodb-org-mongos=4.4.8 mongodb-org-tools=4.4.8" "Installing MongoDB ($(( ++current_step ))/$total_steps)"
+# Install GenieACS
+run_command "npm install -g genieacs@1.2.13" "Installing GenieACS"
 
-#run_command "apt-get update -y" "Updating package list ($(( ++current_step ))/$total_steps)"
+# Create user
+run_command "useradd --system --no-create-home --user-group genieacs" "Creating genieacs user"
 
-#run_command "apt-get install mongodb-org -y" "Installing MongoDB ($(( ++current_step ))/$total_steps)"
+mkdir -p /opt/genieacs/ext
+chown genieacs:genieacs /opt/genieacs/ext
 
-#run_command "apt-get upgrade -y" "Upgrading system ($(( ++current_step ))/$total_steps)"
+mkdir -p /var/log/genieacs
+chown genieacs:genieacs /var/log/genieacs
 
-run_command "systemctl start mongod" "Starting MongoDB service ($(( ++current_step ))/$total_steps)"
-
-run_command "systemctl enable mongod" "Enabling MongoDB service ($(( ++current_step ))/$total_steps)"
-
-run_command "npm install -g genieacs@1.2.13" "Installing GenieACS ($(( ++current_step ))/$total_steps)"
-
-run_command "useradd --system --no-create-home --user-group genieacs" "Creating GenieACS user ($(( ++current_step ))/$total_steps)"
-
-run_command "mkdir -p /opt/genieacs/ext && chown genieacs:genieacs /opt/genieacs/ext" "Creating GenieACS directories ($(( ++current_step ))/$total_steps)"
-
-# Create genieacs.env file
 cat << EOF > /opt/genieacs/genieacs.env
-GENIEACS_CWMP_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-cwmp-access.log
-GENIEACS_NBI_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-nbi-access.log
-GENIEACS_FS_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-fs-access.log
-GENIEACS_UI_ACCESS_LOG_FILE=/var/log/genieacs/genieacs-ui-access.log
-GENIEACS_DEBUG_FILE=/var/log/genieacs/genieacs-debug.yaml
-NODE_OPTIONS=--enable-source-maps
+GENIEACS_CWMP_ACCESS_LOG_FILE=/var/log/genieacs/cwmp.log
+GENIEACS_NBI_ACCESS_LOG_FILE=/var/log/genieacs/nbi.log
+GENIEACS_FS_ACCESS_LOG_FILE=/var/log/genieacs/fs.log
+GENIEACS_UI_ACCESS_LOG_FILE=/var/log/genieacs/ui.log
+GENIEACS_DEBUG_FILE=/var/log/genieacs/debug.yaml
 GENIEACS_EXT_DIR=/opt/genieacs/ext
+NODE_OPTIONS=--enable-source-maps
 EOF
-echo -e "${YELLOW}Creating genieacs.env file ($(( ++current_step ))/$total_steps)${NC}... ${GREEN}Done${NC}"
 
-run_command "node -e \"console.log('GENIEACS_UI_JWT_SECRET=' + require('crypto').randomBytes(128).toString('hex'))\" >> /opt/genieacs/genieacs.env" "Generating JWT secret ($(( ++current_step ))/$total_steps)"
+node -e "console.log('GENIEACS_UI_JWT_SECRET=' + require('crypto').randomBytes(128).toString('hex'))" >> /opt/genieacs/genieacs.env
 
-run_command "chown genieacs:genieacs /opt/genieacs/genieacs.env && chmod 600 /opt/genieacs/genieacs.env" "Setting genieacs.env permissions ($(( ++current_step ))/$total_steps)"
+chown genieacs:genieacs /opt/genieacs/genieacs.env
+chmod 600 /opt/genieacs/genieacs.env
 
-run_command "mkdir /var/log/genieacs && chown genieacs:genieacs /var/log/genieacs" "Creating log directory ($(( ++current_step ))/$total_steps)"
+# Systemd services
+for service in cwmp nbi fs ui
+do
 
-# Create systemd service files
-for service in cwmp nbi fs ui; do
-    cat << EOF > /etc/systemd/system/genieacs-$service.service
+cat << EOF > /etc/systemd/system/genieacs-$service.service
 [Unit]
 Description=GenieACS $service
 After=network.target
@@ -130,40 +106,24 @@ After=network.target
 [Service]
 User=genieacs
 EnvironmentFile=/opt/genieacs/genieacs.env
-ExecStart=/usr/local/bin/genieacs-$service
+ExecStart=/usr/bin/genieacs-$service
 
 [Install]
-WantedBy=default.target
+WantedBy=multi-user.target
 EOF
-    echo -e "${YELLOW}Creating genieacs-$service service file ($(( ++current_step ))/$total_steps)${NC}... ${GREEN}Done${NC}"
+
 done
 
-# Create logrotate configuration
-cat << EOF > /etc/logrotate.d/genieacs
-/var/log/genieacs/*.log /var/log/genieacs/*.yaml {
-    daily
-    rotate 30
-    compress
-    delaycompress
-    dateext
-}
-EOF
-echo -e "${YELLOW}Creating logrotate configuration ($(( ++current_step ))/$total_steps)${NC}... ${GREEN}Done${NC}"
+systemctl daemon-reload
 
-# Enable and start services
-for service in cwmp nbi fs ui; do
-    run_command "systemctl enable genieacs-$service && systemctl start genieacs-$service" "Enabling and starting genieacs-$service ($(( ++current_step ))/$total_steps)"
-done
+systemctl enable genieacs-cwmp
+systemctl enable genieacs-nbi
+systemctl enable genieacs-fs
+systemctl enable genieacs-ui
 
-# Check services status
-echo -e "\n${MAGENTA}${BOLD}Checking services status:${NC}"
-for service in mongod genieacs-cwmp genieacs-nbi genieacs-fs genieacs-ui; do
-    status=$(systemctl is-active $service)
-    if [ "$status" = "active" ]; then
-        echo -e "${GREEN}✔ $service is running${NC}"
-    else
-        echo -e "${RED}✘ $service is not running${NC}"
-    fi
-done
+systemctl start genieacs-cwmp
+systemctl start genieacs-nbi
+systemctl start genieacs-fs
+systemctl start genieacs-ui
 
-echo -e "\n${GREEN}${BOLD}Script execution completed successfully!${NC}"
+echo -e "\n${GREEN}Installation completed${NC}"
